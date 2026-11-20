@@ -1,11 +1,11 @@
 {
   "format": "AES-256-GCM",
   "layout": "nonce[12] || ciphertext || tag[16]",
-  "aad": "zdb-dotnet-broker-20261120-v1",
-  "encrypted_blob_sha256": "559117f9939039d0abfb6c304c44b7dadea7b8e39009bda10bcbaf652314adb8",
-  "plaintext_tar_gz_sha256": "4f8111b74a0b77779a02a388cc5a67fce18676322ae9b7ca19f679b218d1144c",
-  "plaintext_tar_gz_bytes": 8118,
-  "purpose": "Controlled Microsoft .NET workload broker exact-GA differential; self-created MSI, registry key and canary only",
+  "aad": "zdb-dotnet-broker-min-20261120-v1",
+  "encrypted_blob_sha256": "a30cecb0ac85b4b7933cac742085490bc97952264d07289cf14d7dc85f509483",
+  "plaintext_tar_gz_sha256": "80f2b5213a3783fa0b544302c82cf2fa0c69db9404968942f9e12f394f0535cb",
+  "plaintext_tar_gz_bytes": 3776,
+  "purpose": "Controlled Microsoft .NET workload broker exact-GA differential; dedicated protected file and HKLM dependency key only",
   "positive_sdk": "11.0.100",
   "fail_closed_sdk": "10.0.404"
 }

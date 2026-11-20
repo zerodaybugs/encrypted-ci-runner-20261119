@@ -1,24 +1,93 @@
-name: Windows runner smoke
+name: Encrypted .NET workload broker GA differential
 
 on:
   push:
     branches:
       - win-broker-probe-20261120
+    paths:
+      - 'payload.enc.b64'
+      - 'PAYLOAD_PUBLIC_INFO.json'
+      - '.github/workflows/windows-runner-smoke.yml'
   workflow_dispatch:
 
 permissions:
   contents: read
+  id-token: write
 
 jobs:
-  smoke:
+  differential:
     runs-on: windows-latest
-    timeout-minutes: 5
+    timeout-minutes: 35
     steps:
-      - name: Record runner and secret availability
+      - uses: actions/checkout@v4
+
+      - name: Acquire short-lived decryption key through exact-claim OIDC
+        id: key
         shell: pwsh
         env:
-          PAYLOAD_KEY_B64: ${{ secrets.PAYLOAD_KEY_B64 }}
+          KEY_ENDPOINT: https://vercel-deploy-path-smoke-20260829-4j5mwtagx.vercel.app/api/key
+          OIDC_AUDIENCE: zdb-dotnet-broker-key-20261120
         run: |
-          $PSVersionTable | Out-String | Write-Host
-          [Environment]::OSVersion | Out-String | Write-Host
-          Write-Host ("HAS_PAYLOAD_KEY=" + (-not [string]::IsNullOrWhiteSpace($env:PAYLOAD_KEY_B64)))
+          $ErrorActionPreference = 'Stop'
+          $requestUrl = "$env:ACTIONS_ID_TOKEN_REQUEST_URL&audience=$([uri]::EscapeDataString($env:OIDC_AUDIENCE))"
+          $oidc = Invoke-RestMethod -Uri $requestUrl -Headers @{ Authorization = "Bearer $env:ACTIONS_ID_TOKEN_REQUEST_TOKEN" }
+          if ([string]::IsNullOrWhiteSpace($oidc.value)) { throw 'GitHub OIDC token was not issued.' }
+          $keyResponse = Invoke-RestMethod -Method Post -Uri $env:KEY_ENDPOINT -Headers @{ Authorization = "Bearer $($oidc.value)" }
+          if ([string]::IsNullOrWhiteSpace($keyResponse.key)) { throw 'OIDC key exchange returned no key.' }
+          $keyResponse.key | Out-File (Join-Path $env:RUNNER_TEMP 'payload-key.txt') -Encoding ascii -NoNewline
+
+      - name: Decrypt and verify payload
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $info = Get-Content 'PAYLOAD_PUBLIC_INFO.json' -Raw | ConvertFrom-Json
+          $blob = [Convert]::FromBase64String((Get-Content 'payload.enc.b64' -Raw).Trim())
+          $blobHash = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($blob)).ToLowerInvariant()
+          if ($blobHash -ne $info.encrypted_blob_sha256) { throw 'Encrypted payload hash mismatch.' }
+          if ($blob.Length -lt 29) { throw 'Encrypted payload is too short.' }
+
+          [byte[]]$nonce = $blob[0..11]
+          [byte[]]$tag = $blob[($blob.Length-16)..($blob.Length-1)]
+          [byte[]]$cipher = $blob[12..($blob.Length-17)]
+          [byte[]]$key = [Convert]::FromBase64String((Get-Content (Join-Path $env:RUNNER_TEMP 'payload-key.txt') -Raw).Trim())
+          [byte[]]$plain = New-Object byte[] $cipher.Length
+          [byte[]]$aad = [Text.Encoding]::UTF8.GetBytes($info.aad)
+          $aes = [Security.Cryptography.AesGcm]::new($key, 16)
+          try { $aes.Decrypt($nonce, $cipher, $tag, $plain, $aad) } finally { $aes.Dispose() }
+          $plainHash = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($plain)).ToLowerInvariant()
+          if ($plainHash -ne $info.plaintext_tar_gz_sha256) { throw 'Plaintext payload hash mismatch.' }
+          if ($plain.Length -ne [int]$info.plaintext_tar_gz_bytes) { throw 'Plaintext payload size mismatch.' }
+          [IO.File]::WriteAllBytes((Join-Path $env:RUNNER_TEMP 'payload.tar.gz'), $plain)
+          tar.exe -xzf (Join-Path $env:RUNNER_TEMP 'payload.tar.gz') -C $env:RUNNER_TEMP
+
+          Push-Location (Join-Path $env:RUNNER_TEMP 'payload')
+          try {
+            foreach ($line in Get-Content 'PAYLOAD_SHA256SUMS.txt') {
+              if ($line -notmatch '^([0-9a-f]{64})  (.+)$') { throw "Malformed payload manifest line: $line" }
+              $actual = (Get-FileHash -Algorithm SHA256 -LiteralPath $Matches[2]).Hash.ToLowerInvariant()
+              if ($actual -ne $Matches[1]) { throw "Payload file hash mismatch: $($Matches[2])" }
+            }
+          } finally { Pop-Location }
+
+      - name: Run controlled exact-GA differential
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & (Join-Path $env:RUNNER_TEMP 'payload\run.ps1')
+
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dotnet-workload-broker-ga-differential-${{ github.run_id }}
+          path: ${{ runner.temp }}/payload/results/**
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Destroy decrypted workspace
+        if: always()
+        shell: pwsh
+        run: |
+          Remove-Item (Join-Path $env:RUNNER_TEMP 'payload-key.txt') -Force -ErrorAction SilentlyContinue
+          Remove-Item (Join-Path $env:RUNNER_TEMP 'payload.tar.gz') -Force -ErrorAction SilentlyContinue
+          Remove-Item (Join-Path $env:RUNNER_TEMP 'payload') -Recurse -Force -ErrorAction SilentlyContinue

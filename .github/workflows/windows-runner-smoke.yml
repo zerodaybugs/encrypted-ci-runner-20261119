@@ -25,7 +25,7 @@ jobs:
         id: key
         shell: pwsh
         env:
-          KEY_ENDPOINT: https://vercel-deploy-path-smoke-20260829-4j5mwtagx.vercel.app/api/key
+          KEY_ENDPOINT: https://vercel-deploy-path-smoke-20260829-euukme3v5.vercel.app/api/key
           OIDC_AUDIENCE: zdb-dotnet-broker-key-20261120
         run: |
           $ErrorActionPreference = 'Stop'

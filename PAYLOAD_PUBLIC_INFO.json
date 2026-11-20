@@ -1,12 +1,13 @@
 {
   "format": "AES-256-GCM",
   "layout": "nonce[12] || ciphertext || tag[16]",
-  "aad": "zdb-dotnet-broker-full-20261120-v2",
-  "encrypted_blob_sha256": "063c961eb794f0846a3cc55e8501119ae8d79b7b6c2506c482e86650d2b1bdd4",
-  "plaintext_tar_gz_sha256": "9433f469408f2871615f3f0267583ad5bf9de24f5ec180367d1e1a6481088806",
-  "plaintext_tar_gz_bytes": 6960,
+  "aad": "zdb-dotnet-broker-full-20261120-v3",
+  "encrypted_blob_sha256": "c510c2a0625abf67b1d5ef73d594bee03e19404ca930c42a4c2659e76edd3642",
+  "plaintext_tar_gz_sha256": "2353f9a38e59c4abf41e50950a61e43200917b8155b3cc4b41d2232e0ce2f89a",
+  "plaintext_tar_gz_bytes": 7007,
   "purpose": "Controlled Microsoft .NET workload broker exact-GA differential; low-user direct denial, named-pipe client identity, and dedicated admin-only canary only",
   "positive_sdk": "11.0.100",
   "fail_closed_sdk": "10.0.404",
-  "repetitions": 3
+  "repetitions": 3,
+  "harness_revision": "v3-powershell-install-verification"
 }

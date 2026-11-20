@@ -1,11 +1,12 @@
 {
   "format": "AES-256-GCM",
   "layout": "nonce[12] || ciphertext || tag[16]",
-  "aad": "zdb-dotnet-broker-min-20261120-v1",
-  "encrypted_blob_sha256": "a30cecb0ac85b4b7933cac742085490bc97952264d07289cf14d7dc85f509483",
-  "plaintext_tar_gz_sha256": "80f2b5213a3783fa0b544302c82cf2fa0c69db9404968942f9e12f394f0535cb",
-  "plaintext_tar_gz_bytes": 3776,
-  "purpose": "Controlled Microsoft .NET workload broker exact-GA differential; dedicated protected file and HKLM dependency key only",
+  "aad": "zdb-dotnet-broker-full-20261120-v2",
+  "encrypted_blob_sha256": "063c961eb794f0846a3cc55e8501119ae8d79b7b6c2506c482e86650d2b1bdd4",
+  "plaintext_tar_gz_sha256": "9433f469408f2871615f3f0267583ad5bf9de24f5ec180367d1e1a6481088806",
+  "plaintext_tar_gz_bytes": 6960,
+  "purpose": "Controlled Microsoft .NET workload broker exact-GA differential; low-user direct denial, named-pipe client identity, and dedicated admin-only canary only",
   "positive_sdk": "11.0.100",
-  "fail_closed_sdk": "10.0.404"
+  "fail_closed_sdk": "10.0.404",
+  "repetitions": 3
 }

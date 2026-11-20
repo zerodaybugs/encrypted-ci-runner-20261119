@@ -1,0 +1,51 @@
+workflows:
+  macos-ipcert-exact-ga:
+    name: macOS IP certificate exact-GA matrix
+    instance_type: mac_mini_m2
+    max_build_duration: 60
+    environment:
+      groups:
+        - ipcert_secrets
+      vars:
+        DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+        DOTNET_NOLOGO: "1"
+        DOTNET_SKIP_FIRST_TIME_EXPERIENCE: "1"
+    scripts:
+      - name: Decrypt and verify isolated payload
+        script: |
+          set -euo pipefail
+          umask 077
+          test -n "${PAYLOAD_KEY_B64:-}"
+          rm -rf /tmp/ipcert-work
+          mkdir -p /tmp/ipcert-work/payload
+          python3 - <<'PY'
+          import base64
+          import os
+          import pathlib
+
+          pathlib.Path("/tmp/ipcert-work/payload.enc").write_bytes(
+              base64.b64decode(pathlib.Path("payload.enc.b64").read_bytes())
+          )
+          pathlib.Path("/tmp/ipcert-work/key.bin").write_bytes(
+              base64.b64decode(os.environ["PAYLOAD_KEY_B64"])
+          )
+          PY
+          openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -md sha256 \
+            -in /tmp/ipcert-work/payload.enc \
+            -out /tmp/ipcert-work/payload.tar.gz \
+            -pass file:/tmp/ipcert-work/key.bin
+          rm -f /tmp/ipcert-work/key.bin /tmp/ipcert-work/payload.enc
+          tar -C /tmp/ipcert-work/payload -xzf /tmp/ipcert-work/payload.tar.gz
+          rm -f /tmp/ipcert-work/payload.tar.gz
+          cd /tmp/ipcert-work/payload
+          shasum -a 256 -c PAYLOAD_SHA256SUMS.txt
+          chmod 700 run-matrix.sh
+
+      - name: Run exact current-GA matrix twice per runtime
+        script: |
+          cd /tmp/ipcert-work/payload
+          ./run-matrix.sh
+
+    artifacts:
+      - /tmp/ipcert-artifacts/**
+      - /tmp/ipcert-artifacts.tar.gz

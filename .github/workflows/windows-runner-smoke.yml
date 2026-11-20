@@ -1,0 +1,21 @@
+name: Windows runner smoke
+
+on:
+  push:
+    branches:
+      - win-broker-probe-20261120
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: windows-latest
+    timeout-minutes: 5
+    steps:
+      - name: Record runner
+        shell: pwsh
+        run: |
+          $PSVersionTable | Out-String | Write-Host
+          [Environment]::OSVersion | Out-String | Write-Host

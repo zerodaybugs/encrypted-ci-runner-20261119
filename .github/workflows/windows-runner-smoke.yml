@@ -14,8 +14,11 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 5
     steps:
-      - name: Record runner
+      - name: Record runner and secret availability
         shell: pwsh
+        env:
+          PAYLOAD_KEY_B64: ${{ secrets.PAYLOAD_KEY_B64 }}
         run: |
           $PSVersionTable | Out-String | Write-Host
           [Environment]::OSVersion | Out-String | Write-Host
+          Write-Host ("HAS_PAYLOAD_KEY=" + (-not [string]::IsNullOrWhiteSpace($env:PAYLOAD_KEY_B64)))

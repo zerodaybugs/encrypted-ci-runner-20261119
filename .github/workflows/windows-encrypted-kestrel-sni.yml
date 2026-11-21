@@ -1,0 +1,107 @@
+name: Encrypted Windows Kestrel exact-GA validation
+
+on:
+  push:
+    branches:
+      - win-kestrel-sni-20261121
+    paths:
+      - payload.enc.b64
+      - .github/workflows/windows-encrypted-kestrel-sni.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  id-token: write
+
+jobs:
+  validate:
+    runs-on: windows-2025
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: win-kestrel-sni-20261121
+
+      - name: Obtain branch-bound decryption key
+        id: key
+        shell: pwsh
+        env:
+          KEY_ENDPOINT: https://vercel-deploy-path-smoke-20260829-odnjeohnu.vercel.app/api/key
+          OIDC_AUDIENCE: zdb-kestrel-sni-key-20261121
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $tokenUrl = $env:ACTIONS_ID_TOKEN_REQUEST_URL + '&audience=' + [Uri]::EscapeDataString($env:OIDC_AUDIENCE)
+          $oidc = (Invoke-RestMethod -Uri $tokenUrl -Headers @{ Authorization = "Bearer $env:ACTIONS_ID_TOKEN_REQUEST_TOKEN" }).value
+          $response = Invoke-RestMethod -Method Post -Uri $env:KEY_ENDPOINT -Headers @{ Authorization = "Bearer $oidc" }
+          if ([string]::IsNullOrWhiteSpace($response.key)) { throw 'Key endpoint returned no key.' }
+          $keyPath = Join-Path $env:RUNNER_TEMP 'payload-key.txt'
+          [IO.File]::WriteAllText($keyPath, [string]$response.key)
+          "key_path=$keyPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
+      - name: Decrypt isolated payload
+        shell: pwsh
+        env:
+          KEY_PATH: ${{ steps.key.outputs.key_path }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $key = [Convert]::FromBase64String(([IO.File]::ReadAllText($env:KEY_PATH)).Trim())
+          $blob = [Convert]::FromBase64String((Get-Content -LiteralPath 'payload.enc.b64' -Raw).Trim())
+          if ($blob.Length -lt 29) { throw 'Encrypted payload is too short.' }
+          $nonce = [byte[]]$blob[0..11]
+          $tag = [byte[]]$blob[12..27]
+          $ciphertext = [byte[]]$blob[28..($blob.Length - 1)]
+          $plaintext = New-Object byte[] $ciphertext.Length
+          $aes = [System.Security.Cryptography.AesGcm]::new($key, 16)
+          try { $aes.Decrypt($nonce, $ciphertext, $tag, $plaintext, $null) } finally { $aes.Dispose() }
+          $zip = Join-Path $env:RUNNER_TEMP 'payload.zip'
+          [IO.File]::WriteAllBytes($zip, $plaintext)
+          $extract = Join-Path $env:RUNNER_TEMP 'payload-extract'
+          Expand-Archive -LiteralPath $zip -DestinationPath $extract -Force
+          "PAYLOAD_ROOT=$extract\kestrel-sni-win-payload" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Run exact-GA Windows matrix
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & (Join-Path $env:PAYLOAD_ROOT 'run.ps1')
+
+      - name: Encrypt evidence and publish receipt
+        if: success()
+        shell: pwsh
+        env:
+          KEY_PATH: ${{ steps.key.outputs.key_path }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $evidence = Join-Path $env:PAYLOAD_ROOT 'evidence\windows'
+          $summary = Get-Content -LiteralPath (Join-Path $evidence 'windows-matrix.json') -Raw | ConvertFrom-Json
+          if (-not $summary.allAssertionsPassed -or [int]$summary.totalRuns -ne 48) { throw 'Windows matrix receipt is incomplete.' }
+          Write-Host ('WINDOWS_MATRIX_PASS=1 TOTAL_RUNS=' + $summary.totalRuns)
+
+          $resultZip = Join-Path $env:RUNNER_TEMP 'windows-result.zip'
+          Compress-Archive -Path (Join-Path $evidence '*') -DestinationPath $resultZip -Force
+          $key = [Convert]::FromBase64String(([IO.File]::ReadAllText($env:KEY_PATH)).Trim())
+          $nonce = [Security.Cryptography.RandomNumberGenerator]::GetBytes(12)
+          $plaintext = [IO.File]::ReadAllBytes($resultZip)
+          $ciphertext = New-Object byte[] $plaintext.Length
+          $tag = New-Object byte[] 16
+          $aes = [System.Security.Cryptography.AesGcm]::new($key, 16)
+          try { $aes.Encrypt($nonce, $plaintext, $ciphertext, $tag, $null) } finally { $aes.Dispose() }
+          $blob = New-Object byte[] ($nonce.Length + $tag.Length + $ciphertext.Length)
+          [Buffer]::BlockCopy($nonce, 0, $blob, 0, $nonce.Length)
+          [Buffer]::BlockCopy($tag, 0, $blob, $nonce.Length, $tag.Length)
+          [Buffer]::BlockCopy($ciphertext, 0, $blob, $nonce.Length + $tag.Length, $ciphertext.Length)
+          [IO.File]::WriteAllText('windows-result.enc.b64', [Convert]::ToBase64String($blob) + [Environment]::NewLine)
+
+          git config user.name 'zdb-encrypted-ci'
+          git config user.email 'zdb-encrypted-ci@users.noreply.github.com'
+          git add windows-result.enc.b64
+          git commit -m 'Add encrypted Windows validation receipt'
+          git push origin HEAD:win-kestrel-sni-20261121
+
+      - name: Remove transient key
+        if: always()
+        shell: pwsh
+        env:
+          KEY_PATH: ${{ steps.key.outputs.key_path }}
+        run: |
+          if ($env:KEY_PATH -and (Test-Path -LiteralPath $env:KEY_PATH)) { Remove-Item -LiteralPath $env:KEY_PATH -Force }

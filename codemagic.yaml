@@ -1,0 +1,60 @@
+workflows:
+  signedcms-diagnostic-bootstrap:
+    name: SignedCms diagnostic encrypted-channel bootstrap
+    instance_type: linux_x2
+    max_build_duration: 15
+    environment:
+      groups:
+        - ipcert_secrets
+    triggering:
+      events:
+        - push
+      branch_patterns:
+        - pattern: main
+          include: true
+          source: true
+      cancel_previous_builds: true
+    scripts:
+      - name: Derive and publish public encryption key
+        script: |
+          set -euo pipefail
+          umask 077
+          test -n "${PAYLOAD_KEY_B64:-}"
+          if test -s codemagic-x25519-public.pem; then
+            echo "BOOTSTRAP_ALREADY_PUBLISHED=1"
+            exit 0
+          fi
+          rm -rf /tmp/cm-bootstrap
+          mkdir -p /tmp/cm-bootstrap
+          python3 - <<'PY'
+          import base64
+          import hashlib
+          import os
+          import pathlib
+          import json
+
+          secret = base64.b64decode(os.environ["PAYLOAD_KEY_B64"], validate=True)
+          private_raw = hashlib.sha256(b"ZDB-CODEMAGIC-X25519-SIGNEDCMS-DIAGNOSTIC-V1\x00" + secret).digest()
+          # RFC 8410 PKCS#8: PrivateKeyInfo(X25519, OCTET STRING(raw private key)).
+          der = bytes.fromhex("302e020100300506032b656e04220420") + private_raw
+          pathlib.Path("/tmp/cm-bootstrap/private.der").write_bytes(der)
+          pathlib.Path("/tmp/cm-bootstrap/metadata.json").write_text(json.dumps({
+              "scheme": "X25519+HKDF-SHA256+AES-256-GCM",
+              "context": "ZDB-CODEMAGIC-X25519-SIGNEDCMS-DIAGNOSTIC-V1",
+              "secret_present": True
+          }, sort_keys=True, indent=2) + "\n", encoding="utf-8")
+          PY
+          openssl pkey -inform DER -in /tmp/cm-bootstrap/private.der -pubout -out codemagic-x25519-public.pem
+          sha256sum codemagic-x25519-public.pem > codemagic-x25519-public.pem.sha256
+          cp /tmp/cm-bootstrap/metadata.json codemagic-x25519-metadata.json
+          rm -f /tmp/cm-bootstrap/private.der
+          git config user.name "Codemagic encrypted diagnostic bootstrap"
+          git config user.email "80965714+zerodaybugs@users.noreply.github.com"
+          git add codemagic-x25519-public.pem codemagic-x25519-public.pem.sha256 codemagic-x25519-metadata.json
+          git commit -m "ci: publish secret-bound diagnostic public key"
+          git push origin HEAD:main
+          echo "BOOTSTRAP_PUBLIC_KEY_PUBLISHED=1"
+    artifacts:
+      - codemagic-x25519-public.pem
+      - codemagic-x25519-public.pem.sha256
+      - codemagic-x25519-metadata.json
